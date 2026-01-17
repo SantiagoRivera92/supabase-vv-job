@@ -1,11 +1,16 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
+const weighs = JSON.parse(await Deno.readTextFile('weighs.json'));
+const prioritize = new Set(weighs.prioritize);
+const deprioritize = new Set(weighs.deprioritize);
+
 interface Card {
   oracle_id: string;
   name: string;
   legalities: { vintage: string };
   prices: { usd?: string; usd_foil?: string; usd_etched?: string };
   edhrec_rank?: number;
+  set_name: string;
 }
 
 async function runUpdate() {
@@ -52,8 +57,16 @@ async function runUpdate() {
   const today = new Date().toISOString().split('T')[0];
 
   for (const card of cardsData) {
+    // 1. Basic Filters
     if (card.legalities?.vintage === 'not_legal' || !card.oracle_id) continue;
 
+    // 2. NEW OPTIMIZATION: Dismiss "Summer Magic / Edgar" printings
+    // Scryfall uses set_name for the full title and card.set for the code
+    if (card.set_name === "Summer Magic / Edgar") {
+        continue; 
+    }
+
+    // 3. Price Calculation
     const prices = [card.prices?.usd, card.prices?.usd_foil, card.prices?.usd_etched]
       .filter((p): p is string => !!p)
       .map(p => parseFloat(p));
@@ -61,11 +74,20 @@ async function runUpdate() {
     if (prices.length === 0) continue;
     const minPrice = Math.min(...prices);
 
+    // 4. Cheapest Printing Logic
     if (!(card.oracle_id in cardDict) || cardDict[card.oracle_id].price > minPrice) {
+      let adjustedRank = card.edhrec_rank;
+      if (adjustedRank !== undefined) {
+        if (prioritize.has(card.name)) {
+          adjustedRank = Math.max(1, Math.floor(adjustedRank / 1000));
+        } else if (deprioritize.has(card.name)) {
+          adjustedRank = Math.floor(adjustedRank * 10000);
+        }
+      }
       cardDict[card.oracle_id] = {
         oracle_id: card.oracle_id,
         name: card.name,
-        edhrec_rank: card.edhrec_rank,
+        edhrec_rank: adjustedRank,
         price: minPrice,
         date: today
       };
