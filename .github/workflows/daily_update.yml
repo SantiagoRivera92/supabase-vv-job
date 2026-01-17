@@ -1,0 +1,25 @@
+name: Daily Card Update
+
+on:
+  schedule:
+    # This runs at 23:30 UTC every day
+    - cron: '30 23 * * *'
+  workflow_dispatch: # Allows you to run it manually from the "Actions" tab
+
+jobs:
+  update-cards:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x # Ensures you use the latest stable Deno
+
+      - name: Run Update Script
+        run: deno run --allow-net --allow-env update-cards.ts
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
