@@ -19,7 +19,7 @@ jobs:
           deno-version: v2.x # Ensures you use the latest stable Deno
 
       - name: Run Update Script
-        run: deno run --allow-net --allow-env update-cards.ts
+        run: deno run --allow-read --allow-net --allow-env update-cards.ts
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
