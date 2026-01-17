@@ -54,7 +54,7 @@ async function runUpdate() {
 
   // 4. Transform Data
   const cardDict: Record<string, any> = {};
-  const today = new Date().toISOString().split('T')[0];
+  const now = new Date().toISOString();
 
   for (const card of cardsData) {
     // 1. Basic Filters
@@ -89,7 +89,7 @@ async function runUpdate() {
         name: card.name,
         edhrec_rank: adjustedRank,
         price: minPrice,
-        date: today
+        date: now
       };
     }
   }
@@ -113,7 +113,8 @@ async function runUpdate() {
     await supabase.from('prices').insert(batch.map(c => ({
       oracle_id: c.oracle_id,
       price: c.price,
-      date: c.date
+      date: c.date,
+      filename: target.updated_at
     })));
 
     if (i % 5000 === 0) console.log(`Progress: ${i} / ${entries.length}`);
