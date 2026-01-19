@@ -103,25 +103,52 @@ async function runUpdate() {
     const batch = entries.slice(i, i + batchSize);
     
     // Upsert Card Info
-    await supabase.from('cards').upsert(batch.map(c => ({
-      oracle_id: c.oracle_id,
-      name: c.name,
-      edhrec_rank: c.edhrec_rank
-    })));
+    try {
+      const { error: cardsError } = await supabase.from('cards').upsert(batch.map(c => ({
+        oracle_id: c.oracle_id,
+        name: c.name,
+        edhrec_rank: c.edhrec_rank
+      })));
+      if (cardsError) {
+        console.error(`Error upserting cards: ${cardsError.message}`);
+      } else {
+        console.log(`Successfully upserted ${batch.length} cards.`);
+      }
+    } catch (err) {
+      console.error(`Exception upserting cards: ${err}`);
+    }
 
     // Insert Price Info
-    await supabase.from('prices').insert(batch.map(c => ({
-      oracle_id: c.oracle_id,
-      price: c.price,
-      date: c.date,
-      filename: target.updated_at
-    })));
+    try {
+      const { error: pricesError } = await supabase.from('prices').insert(batch.map(c => ({
+        oracle_id: c.oracle_id,
+        price: c.price,
+        date: c.date,
+        filename: target.updated_at
+      })));
+      if (pricesError) {
+        console.error(`Error inserting prices: ${pricesError.message}`);
+      } else {
+        console.log(`Successfully inserted ${batch.length} price entries.`);
+      }
+    } catch (err) {
+      console.error(`Exception inserting prices: ${err}`);
+    }
 
     if (i % 5000 === 0) console.log(`Progress: ${i} / ${entries.length}`);
   }
 
   // 6. Record Success
-  await supabase.from('updates').insert({ filename: target.updated_at });
+  try {
+    const { error: updatesError } = await supabase.from('updates').insert({ filename: target.updated_at });
+    if (updatesError) {
+      console.error(`Error recording update: ${updatesError.message}`);
+    } else {
+      console.log("Successfully recorded update.");
+    }
+  } catch (err) {
+    console.error(`Exception recording update: ${err}`);
+  }
   console.log("--- Update Finished Successfully ---");
 }
 
