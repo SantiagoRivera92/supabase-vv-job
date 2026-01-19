@@ -94,7 +94,21 @@ async function runUpdate() {
     }
   }
 
-  // 5. Bulk Upsert in Batches
+  // 5. Record the update first to satisfy foreign key
+  try {
+    const { error: updatesError } = await supabase.from('updates').insert({ filename: target.updated_at });
+    if (updatesError) {
+      console.error(`Error recording update: ${updatesError.message}`);
+      return; // Exit if we can't record the update
+    } else {
+      console.log("Successfully recorded update.");
+    }
+  } catch (err) {
+    console.error(`Exception recording update: ${err}`);
+    return;
+  }
+
+  // 6. Bulk Upsert in Batches
   const entries = Object.values(cardDict);
   const batchSize = 1000;
   console.log(`Upserting ${entries.length} cards in batches of ${batchSize}...`);
@@ -138,17 +152,7 @@ async function runUpdate() {
     if (i % 5000 === 0) console.log(`Progress: ${i} / ${entries.length}`);
   }
 
-  // 6. Record Success
-  try {
-    const { error: updatesError } = await supabase.from('updates').insert({ filename: target.updated_at });
-    if (updatesError) {
-      console.error(`Error recording update: ${updatesError.message}`);
-    } else {
-      console.log("Successfully recorded update.");
-    }
-  } catch (err) {
-    console.error(`Exception recording update: ${err}`);
-  }
+
   console.log("--- Update Finished Successfully ---");
 }
 
