@@ -61,8 +61,9 @@ async function runUpdate() {
     // 1. Basic Filters
     if (card.legalities?.vintage === 'not_legal' || !card.oracle_id) continue;
 
-    if (card.set_name === "Summer Magic / Edgar" or card.set_type === "Memorabilia" ) {
+    if (card.set_name === "Summer Magic / Edgar" || card.set_type === "Memorabilia" ) {
         // Get rid of Summer Magic and gold border bullshit
+        console.log("Skipping", card.name, "from set ", card.set_name)  
         continue; 
     }
 
