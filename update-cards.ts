@@ -11,6 +11,7 @@ interface Card {
   prices: { usd?: string; usd_foil?: string; usd_etched?: string };
   edhrec_rank?: number;
   set_name: string;
+  tcgplayer_id?: number;
 }
 
 async function runUpdate() {
@@ -88,6 +89,7 @@ async function runUpdate() {
         oracle_id: card.oracle_id,
         name: card.name,
         edhrec_rank: adjustedRank,
+        tcgplayer_id: card.tcgplayer_id,
         price: minPrice,
         date: now
       };
@@ -121,7 +123,8 @@ async function runUpdate() {
       const { error: cardsError } = await supabase.from('cards').upsert(batch.map(c => ({
         oracle_id: c.oracle_id,
         name: c.name,
-        edhrec_rank: c.edhrec_rank
+        edhrec_rank: c.edhrec_rank,
+        tcgplayer_id: c.tcgplayer_id
       })));
       if (cardsError) {
         console.error(`Error upserting cards: ${cardsError.message}`);
