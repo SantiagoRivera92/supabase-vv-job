@@ -12,6 +12,7 @@ interface Card {
   edhrec_rank?: number;
   set_name: string;
   tcgplayer_id?: number;
+  set_type: string;
 }
 
 async function runUpdate() {
@@ -61,9 +62,9 @@ async function runUpdate() {
     // 1. Basic Filters
     if (card.legalities?.vintage === 'not_legal' || !card.oracle_id) continue;
 
-    // 2. NEW OPTIMIZATION: Dismiss "Summer Magic / Edgar" printings
-    // Scryfall uses set_name for the full title and card.set for the code
-    if (card.set_name === "Summer Magic / Edgar") {
+    if (card.set_name === "Summer Magic / Edgar" || card.set_type === "memorabilia" ) {
+        // Get rid of Summer Magic and gold border bullshit
+        console.log("Skipping", card.name, "from set ", card.set_name)  
         continue; 
     }
 
