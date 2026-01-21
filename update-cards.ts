@@ -48,7 +48,7 @@ async function runUpdate() {
     return;
   }
 
-  // 3. Download & Parse (7GB RAM handles this easily)
+  // 3. Download & Parse
   console.log("Downloading 500MB+ Scryfall data...");
   const cardsRes = await fetch(target.download_uri);
   const cardsData: Card[] = await cardsRes.json();
@@ -59,16 +59,15 @@ async function runUpdate() {
   const now = new Date().toISOString();
 
   for (const card of cardsData) {
-    // 1. Basic Filters
+    // Basic Filters
     if (card.legalities?.vintage === 'not_legal' || !card.oracle_id) continue;
 
-    if (card.set_name === "Summer Magic / Edgar" || card.set_type === "memorabilia" ) {
-        // Get rid of Summer Magic and gold border bullshit
-        console.log("Skipping", card.name, "from set ", card.set_name)  
-        continue; 
+    if (card.set_name === "Summer Magic / Edgar" || card.set_type === "memorabilia") {
+      console.log("Skipping", card.name, "from set ", card.set_name);
+      continue; 
     }
 
-    // 3. Price Calculation
+    // Price Calculation
     const prices = [card.prices?.usd, card.prices?.usd_foil, card.prices?.usd_etched]
       .filter((p): p is string => !!p)
       .map(p => parseFloat(p));
@@ -76,23 +75,31 @@ async function runUpdate() {
     if (prices.length === 0) continue;
     const minPrice = Math.min(...prices);
 
-    // 4. Cheapest Printing Logic
+    // Cheapest Printing Logic
     if (!(card.oracle_id in cardDict) || cardDict[card.oracle_id].price > minPrice) {
       let adjustedRank = card.edhrec_rank;
+      
+      // Determine Boolean flags from weighs
+      const isStaple = prioritize.has(card.name);
+      const isDisincentivized = deprioritize.has(card.name);
+
       if (adjustedRank !== undefined) {
-        if (prioritize.has(card.name)) {
+        if (isStaple) {
           adjustedRank = Math.max(1, Math.floor(adjustedRank / 1000));
-        } else if (deprioritize.has(card.name)) {
+        } else if (isDisincentivized) {
           adjustedRank = Math.floor(adjustedRank * 10000);
         }
       }
+
       cardDict[card.oracle_id] = {
         oracle_id: card.oracle_id,
         name: card.name,
         edhrec_rank: adjustedRank,
         tcgplayer_id: card.tcgplayer_id,
         price: minPrice,
-        date: now
+        date: now,
+        is_staple: isStaple,
+        is_disincentivized: isDisincentivized
       };
     }
   }
@@ -102,7 +109,7 @@ async function runUpdate() {
     const { error: updatesError } = await supabase.from('updates').insert({ filename: target.updated_at });
     if (updatesError) {
       console.error(`Error recording update: ${updatesError.message}`);
-      return; // Exit if we can't record the update
+      return; 
     } else {
       console.log("Successfully recorded update.");
     }
@@ -119,14 +126,17 @@ async function runUpdate() {
   for (let i = 0; i < entries.length; i += batchSize) {
     const batch = entries.slice(i, i + batchSize);
     
-    // Upsert Card Info
+    // Upsert Card Info (Including new columns)
     try {
       const { error: cardsError } = await supabase.from('cards').upsert(batch.map(c => ({
         oracle_id: c.oracle_id,
         name: c.name,
         edhrec_rank: c.edhrec_rank,
-        tcgplayer_id: c.tcgplayer_id
+        tcgplayer_id: c.tcgplayer_id,
+        is_staple: c.is_staple,
+        is_disincentivized: c.is_disincentivized
       })));
+      
       if (cardsError) {
         console.error(`Error upserting cards: ${cardsError.message}`);
       } else {
@@ -155,7 +165,6 @@ async function runUpdate() {
 
     if (i % 5000 === 0) console.log(`Progress: ${i} / ${entries.length}`);
   }
-
 
   console.log("--- Update Finished Successfully ---");
 }
