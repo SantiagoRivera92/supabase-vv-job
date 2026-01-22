@@ -67,10 +67,11 @@ async function runUpdate() {
       continue; 
     }
 
-    // Price Calculation
+    // Price Calculation: only consider prices > 0.01
     const prices = [card.prices?.usd, card.prices?.usd_foil, card.prices?.usd_etched]
       .filter((p): p is string => !!p)
-      .map(p => parseFloat(p));
+      .map(p => parseFloat(p))
+      .filter(price => price > 0.01);
 
     if (prices.length === 0) continue;
     const minPrice = Math.min(...prices);
@@ -164,6 +165,49 @@ async function runUpdate() {
     }
 
     if (i % 5000 === 0) console.log(`Progress: ${i} / ${entries.length}`);
+  }
+
+  // 7. Cleanup: Remove prices and updates older than one week
+  try {
+    const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const { data: oldUpdates, error: oldUpdatesError } = await supabase
+      .from('updates')
+      .select('filename')
+      .lt('filename', oneWeekAgo);
+
+    if (oldUpdatesError) {
+      console.error('Error fetching old updates:', oldUpdatesError.message);
+    } else if (oldUpdates && oldUpdates.length > 0) {
+      const filenames = oldUpdates.map(u => u.filename);
+
+      // Delete prices with those filenames
+      const { error: pricesDeleteError } = await supabase
+        .from('prices')
+        .delete()
+        .in('filename', filenames);
+
+      if (pricesDeleteError) {
+        console.error('Error deleting old prices:', pricesDeleteError.message);
+      } else {
+        console.log(`Deleted prices for filenames: ${filenames.join(', ')}`);
+      }
+
+      // Delete updates themselves
+      const { error: updatesDeleteError } = await supabase
+        .from('updates')
+        .delete()
+        .in('filename', filenames);
+
+      if (updatesDeleteError) {
+        console.error('Error deleting old updates:', updatesDeleteError.message);
+      } else {
+        console.log(`Deleted old updates: ${filenames.join(', ')}`);
+      }
+    } else {
+      console.log('No updates older than one week to delete.');
+    }
+  } catch (err) {
+    console.error('Exception during cleanup:', err);
   }
 
   console.log("--- Update Finished Successfully ---");
