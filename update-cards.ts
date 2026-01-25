@@ -1,4 +1,4 @@
-import { createClient } from 'https://cdn.skypack.dev/@supabase/supabase-js';
+import { createClient } from 'npm:@supabase/supabase-js@2';
 
 const weighs = JSON.parse(await Deno.readTextFile('weighs.json'));
 const prioritize = new Set(weighs.prioritize);
