@@ -67,9 +67,9 @@ async function runUpdate() {
       continue;
     }
 
-    // Skip specific sets
+    // Skip specific sets (Memorabilia/Forbidden sets)
     if (card.set_name === "Summer Magic / Edgar" || card.set_type === "memorabilia") {
-      if (isJace) console.log(`[JACE DEBUG] Skipped: Set "${card.set_name}" is excluded.`);
+      if (isJace) console.log(`[JACE DEBUG] Skipped: Set "${card.set_name}" (type: ${card.set_type}) is excluded.`);
       continue; 
     }
 
@@ -86,7 +86,7 @@ async function runUpdate() {
     
     const minPrice = Math.min(...prices);
 
-    // Logic: Determine if this printing is the new cheapest
+    // Logic: Keep the absolute cheapest printing found across all sets
     const alreadyInDict = card.oracle_id in cardDict;
     const isCheaper = !alreadyInDict || minPrice < cardDict[card.oracle_id].price;
 
@@ -118,17 +118,23 @@ async function runUpdate() {
         is_disincentivized: isDisincentivized
       };
     } else if (isJace) {
-      console.log(`[JACE DEBUG] Ignored: ${card.set_name} ($${minPrice}) is more expensive than current ($${cardDict[card.oracle_id].price}).`);
+      // Just for logging to verify logic works
+      // console.log(`[JACE DEBUG] Ignored: ${card.set_name} ($${minPrice}) is more expensive than current ($${cardDict[card.oracle_id].price}).`);
     }
   }
 
-  // Double check if Jace made it into the final dictionary
-  const jaceOracleId = "ae430263-9566-4074-90f7-53531633cf48"; // Standard Jace Oracle ID
-  if (!cardDict[jaceOracleId]) {
-    console.warn("!!! [WARNING] Jace, the Mind Sculptor was NOT found in the final card dictionary.");
+  // Final Verification Check
+  const finalEntries = Object.values(cardDict);
+  const jaceFound = finalEntries.some(c => c.name === "Jace, the Mind Sculptor");
+
+  if (!jaceFound) {
+    console.error("!!! CRITICAL: Jace, the Mind Sculptor missing from final dictionary. Aborting Update.");
+    return;
+  } else {
+    console.log(`[VERIFIED] Jace successfully prepared for upload.`);
   }
 
-  // 5. Record the update
+  // 5. Record the update metadata
   try {
     const { error: updatesError } = await supabase.from('updates').insert({ filename: target.updated_at });
     if (updatesError) {
@@ -140,14 +146,18 @@ async function runUpdate() {
     return;
   }
 
-  // 6. Bulk Upsert
-  const entries = Object.values(cardDict);
+  // 6. Bulk Upsert in Batches
   const batchSize = 1000;
-  console.log(`Upserting ${entries.length} cards...`);
+  console.log(`Upserting ${finalEntries.length} cards in batches...`);
 
-  for (let i = 0; i < entries.length; i += batchSize) {
-    const batch = entries.slice(i, i + batchSize);
+  for (let i = 0; i < finalEntries.length; i += batchSize) {
+    const batch = finalEntries.slice(i, i + batchSize);
     
+    // Check if Jace is in this specific batch for logging
+    if (batch.some(c => c.name === "Jace, the Mind Sculptor")) {
+      console.log(`[UPSERT] Processing batch containing Jace...`);
+    }
+
     try {
       const { error: cardsError } = await supabase.from('cards').upsert(batch.map(c => ({
         oracle_id: c.oracle_id,
@@ -173,12 +183,5 @@ async function runUpdate() {
     } catch (err) {
       console.error(`Exception inserting prices: ${err}`);
     }
-  }
 
-  console.log("--- Update Finished Successfully ---");
-}
-
-runUpdate().catch(err => {
-  console.error("FAILED:", err);
-  Deno.exit(1);
-});
+    if (i % 10000 === 0) console.log(`Progress: ${i} / ${finalEntries.length}`);
