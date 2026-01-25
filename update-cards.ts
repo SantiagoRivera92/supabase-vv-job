@@ -1,4 +1,4 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.1';
 
 const weighs = JSON.parse(await Deno.readTextFile('weighs.json'));
 const prioritize = new Set(weighs.prioritize);
