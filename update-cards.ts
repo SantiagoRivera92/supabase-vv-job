@@ -59,28 +59,28 @@ async function runUpdate() {
   const now = new Date().toISOString();
 
   for (const card of cardsData) {
-    // Basic Filters
+    // Basic Filters: Must be Vintage legal/restricted and have an oracle_id
     if (card.legalities?.vintage === 'not_legal' || !card.oracle_id) continue;
 
+    // Skip specific sets entirely
     if (card.set_name === "Summer Magic / Edgar" || card.set_type === "memorabilia") {
-      console.log("Skipping", card.name, "from set ", card.set_name);
       continue; 
     }
 
-    // Price Calculation: only consider prices > 0.01
+    // Price Calculation
     const prices = [card.prices?.usd, card.prices?.usd_foil, card.prices?.usd_etched]
       .filter((p): p is string => !!p)
       .map(p => parseFloat(p))
       .filter(price => price > 0.01);
 
+    // If no valid price, we can't determine the "cheapest" printing
     if (prices.length === 0) continue;
     const minPrice = Math.min(...prices);
 
-    // Cheapest Printing Logic
-    if (!(card.oracle_id in cardDict) || cardDict[card.oracle_id].price > minPrice) {
+    // Logic: Keep the printing with the lowest minPrice found so far for this oracle_id
+    if (!(card.oracle_id in cardDict) || minPrice < cardDict[card.oracle_id].price) {
       let adjustedRank = card.edhrec_rank;
       
-      // Determine Boolean flags from weighs
       const isStaple = prioritize.has(card.name);
       const isDisincentivized = deprioritize.has(card.name);
 
@@ -127,7 +127,6 @@ async function runUpdate() {
   for (let i = 0; i < entries.length; i += batchSize) {
     const batch = entries.slice(i, i + batchSize);
     
-    // Upsert Card Info (Including new columns)
     try {
       const { error: cardsError } = await supabase.from('cards').upsert(batch.map(c => ({
         oracle_id: c.oracle_id,
@@ -138,16 +137,11 @@ async function runUpdate() {
         is_disincentivized: c.is_disincentivized
       })));
       
-      if (cardsError) {
-        console.error(`Error upserting cards: ${cardsError.message}`);
-      } else {
-        console.log(`Successfully upserted ${batch.length} cards.`);
-      }
+      if (cardsError) console.error(`Error upserting cards: ${cardsError.message}`);
     } catch (err) {
       console.error(`Exception upserting cards: ${err}`);
     }
 
-    // Insert Price Info
     try {
       const { error: pricesError } = await supabase.from('prices').insert(batch.map(c => ({
         oracle_id: c.oracle_id,
@@ -155,11 +149,7 @@ async function runUpdate() {
         date: c.date,
         filename: target.updated_at
       })));
-      if (pricesError) {
-        console.error(`Error inserting prices: ${pricesError.message}`);
-      } else {
-        console.log(`Successfully inserted ${batch.length} price entries.`);
-      }
+      if (pricesError) console.error(`Error inserting prices: ${pricesError.message}`);
     } catch (err) {
       console.error(`Exception inserting prices: ${err}`);
     }
@@ -167,44 +157,19 @@ async function runUpdate() {
     if (i % 5000 === 0) console.log(`Progress: ${i} / ${entries.length}`);
   }
 
-  // 7. Cleanup: Remove prices and updates older than one week
+  // 7. Cleanup: Remove data older than one week
   try {
     const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-    const { data: oldUpdates, error: oldUpdatesError } = await supabase
+    const { data: oldUpdates } = await supabase
       .from('updates')
       .select('filename')
       .lt('filename', oneWeekAgo);
 
-    if (oldUpdatesError) {
-      console.error('Error fetching old updates:', oldUpdatesError.message);
-    } else if (oldUpdates && oldUpdates.length > 0) {
+    if (oldUpdates && oldUpdates.length > 0) {
       const filenames = oldUpdates.map(u => u.filename);
-
-      // Delete prices with those filenames
-      const { error: pricesDeleteError } = await supabase
-        .from('prices')
-        .delete()
-        .in('filename', filenames);
-
-      if (pricesDeleteError) {
-        console.error('Error deleting old prices:', pricesDeleteError.message);
-      } else {
-        console.log(`Deleted prices for filenames: ${filenames.join(', ')}`);
-      }
-
-      // Delete updates themselves
-      const { error: updatesDeleteError } = await supabase
-        .from('updates')
-        .delete()
-        .in('filename', filenames);
-
-      if (updatesDeleteError) {
-        console.error('Error deleting old updates:', updatesDeleteError.message);
-      } else {
-        console.log(`Deleted old updates: ${filenames.join(', ')}`);
-      }
-    } else {
-      console.log('No updates older than one week to delete.');
+      await supabase.from('prices').delete().in('filename', filenames);
+      await supabase.from('updates').delete().in('filename', filenames);
+      console.log(`Cleaned up ${filenames.length} old update files.`);
     }
   } catch (err) {
     console.error('Exception during cleanup:', err);
