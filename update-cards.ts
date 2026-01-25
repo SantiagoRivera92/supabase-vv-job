@@ -59,11 +59,17 @@ async function runUpdate() {
   const now = new Date().toISOString();
 
   for (const card of cardsData) {
-    // Basic Filters: Must be Vintage legal/restricted and have an oracle_id
-    if (card.legalities?.vintage === 'not_legal' || !card.oracle_id) continue;
+    const isJace = card.name === "Jace, the Mind Sculptor";
 
-    // Skip specific sets entirely
+    // Basic Filters
+    if (card.legalities?.vintage === 'not_legal' || !card.oracle_id) {
+      if (isJace) console.log(`[JACE DEBUG] Skipped: Not Vintage Legal or missing Oracle ID.`);
+      continue;
+    }
+
+    // Skip specific sets
     if (card.set_name === "Summer Magic / Edgar" || card.set_type === "memorabilia") {
+      if (isJace) console.log(`[JACE DEBUG] Skipped: Set "${card.set_name}" is excluded.`);
       continue; 
     }
 
@@ -73,14 +79,23 @@ async function runUpdate() {
       .map(p => parseFloat(p))
       .filter(price => price > 0.01);
 
-    // If no valid price, we can't determine the "cheapest" printing
-    if (prices.length === 0) continue;
+    if (prices.length === 0) {
+      if (isJace) console.log(`[JACE DEBUG] Skipped: No prices > 0.01 in set "${card.set_name}".`);
+      continue;
+    }
+    
     const minPrice = Math.min(...prices);
 
-    // Logic: Keep the printing with the lowest minPrice found so far for this oracle_id
-    if (!(card.oracle_id in cardDict) || minPrice < cardDict[card.oracle_id].price) {
+    // Logic: Determine if this printing is the new cheapest
+    const alreadyInDict = card.oracle_id in cardDict;
+    const isCheaper = !alreadyInDict || minPrice < cardDict[card.oracle_id].price;
+
+    if (isCheaper) {
+      if (isJace) {
+        console.log(`[JACE DEBUG] NEW CHEAPEST: ${card.set_name} | Price: $${minPrice} | Previous: $${alreadyInDict ? cardDict[card.oracle_id].price : 'None'}`);
+      }
+
       let adjustedRank = card.edhrec_rank;
-      
       const isStaple = prioritize.has(card.name);
       const isDisincentivized = deprioritize.has(card.name);
 
@@ -102,27 +117,33 @@ async function runUpdate() {
         is_staple: isStaple,
         is_disincentivized: isDisincentivized
       };
+    } else if (isJace) {
+      console.log(`[JACE DEBUG] Ignored: ${card.set_name} ($${minPrice}) is more expensive than current ($${cardDict[card.oracle_id].price}).`);
     }
   }
 
-  // 5. Record the update first to satisfy foreign key
+  // Double check if Jace made it into the final dictionary
+  const jaceOracleId = "ae430263-9566-4074-90f7-53531633cf48"; // Standard Jace Oracle ID
+  if (!cardDict[jaceOracleId]) {
+    console.warn("!!! [WARNING] Jace, the Mind Sculptor was NOT found in the final card dictionary.");
+  }
+
+  // 5. Record the update
   try {
     const { error: updatesError } = await supabase.from('updates').insert({ filename: target.updated_at });
     if (updatesError) {
       console.error(`Error recording update: ${updatesError.message}`);
       return; 
-    } else {
-      console.log("Successfully recorded update.");
     }
   } catch (err) {
     console.error(`Exception recording update: ${err}`);
     return;
   }
 
-  // 6. Bulk Upsert in Batches
+  // 6. Bulk Upsert
   const entries = Object.values(cardDict);
   const batchSize = 1000;
-  console.log(`Upserting ${entries.length} cards in batches of ${batchSize}...`);
+  console.log(`Upserting ${entries.length} cards...`);
 
   for (let i = 0; i < entries.length; i += batchSize) {
     const batch = entries.slice(i, i + batchSize);
@@ -136,7 +157,6 @@ async function runUpdate() {
         is_staple: c.is_staple,
         is_disincentivized: c.is_disincentivized
       })));
-      
       if (cardsError) console.error(`Error upserting cards: ${cardsError.message}`);
     } catch (err) {
       console.error(`Exception upserting cards: ${err}`);
@@ -153,26 +173,6 @@ async function runUpdate() {
     } catch (err) {
       console.error(`Exception inserting prices: ${err}`);
     }
-
-    if (i % 5000 === 0) console.log(`Progress: ${i} / ${entries.length}`);
-  }
-
-  // 7. Cleanup: Remove data older than one week
-  try {
-    const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-    const { data: oldUpdates } = await supabase
-      .from('updates')
-      .select('filename')
-      .lt('filename', oneWeekAgo);
-
-    if (oldUpdates && oldUpdates.length > 0) {
-      const filenames = oldUpdates.map(u => u.filename);
-      await supabase.from('prices').delete().in('filename', filenames);
-      await supabase.from('updates').delete().in('filename', filenames);
-      console.log(`Cleaned up ${filenames.length} old update files.`);
-    }
-  } catch (err) {
-    console.error('Exception during cleanup:', err);
   }
 
   console.log("--- Update Finished Successfully ---");
