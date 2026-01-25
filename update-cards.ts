@@ -117,9 +117,6 @@ async function runUpdate() {
         is_staple: isStaple,
         is_disincentivized: isDisincentivized
       };
-    } else if (isJace) {
-      // Just for logging to verify logic works
-      // console.log(`[JACE DEBUG] Ignored: ${card.set_name} ($${minPrice}) is more expensive than current ($${cardDict[card.oracle_id].price}).`);
     }
   }
 
@@ -185,3 +182,27 @@ async function runUpdate() {
     }
 
     if (i % 10000 === 0) console.log(`Progress: ${i} / ${finalEntries.length}`);
+  }
+
+  // 7. Cleanup (Only runs if the upsert finished)
+  try {
+    const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const { data: oldUpdates } = await supabase.from('updates').select('filename').lt('filename', oneWeekAgo);
+
+    if (oldUpdates && oldUpdates.length > 0) {
+      const filenames = oldUpdates.map(u => u.filename);
+      await supabase.from('prices').delete().in('filename', filenames);
+      await supabase.from('updates').delete().in('filename', filenames);
+      console.log(`Cleaned up ${filenames.length} old entries.`);
+    }
+  } catch (err) {
+    console.error('Exception during cleanup:', err);
+  }
+
+  console.log("--- Update Finished Successfully ---");
+}
+
+runUpdate().catch(err => {
+  console.error("FAILED:", err);
+  Deno.exit(1);
+});
