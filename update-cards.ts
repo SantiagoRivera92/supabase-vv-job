@@ -59,17 +59,14 @@ async function runUpdate() {
   const now = new Date().toISOString();
 
   for (const card of cardsData) {
-    const isJace = card.name === "Jace, the Mind Sculptor";
 
     // Basic Filters
     if (card.legalities?.vintage === 'not_legal' || !card.oracle_id) {
-      if (isJace) console.log(`[JACE DEBUG] Skipped: Not Vintage Legal or missing Oracle ID.`);
       continue;
     }
 
     // Skip specific sets (Memorabilia/Forbidden sets)
     if (card.set_name === "Summer Magic / Edgar" || card.set_type === "memorabilia") {
-      if (isJace) console.log(`[JACE DEBUG] Skipped: Set "${card.set_name}" (type: ${card.set_type}) is excluded.`);
       continue; 
     }
 
@@ -80,7 +77,6 @@ async function runUpdate() {
       .filter(price => price > 0.01);
 
     if (prices.length === 0) {
-      if (isJace) console.log(`[JACE DEBUG] Skipped: No prices > 0.01 in set "${card.set_name}".`);
       continue;
     }
     
@@ -91,9 +87,6 @@ async function runUpdate() {
     const isCheaper = !alreadyInDict || minPrice < cardDict[card.oracle_id].price;
 
     if (isCheaper) {
-      if (isJace) {
-        console.log(`[JACE DEBUG] NEW CHEAPEST: ${card.set_name} | Price: $${minPrice} | Previous: $${alreadyInDict ? cardDict[card.oracle_id].price : 'None'}`);
-      }
 
       let adjustedRank = card.edhrec_rank;
       const isStaple = prioritize.has(card.name);
@@ -122,14 +115,6 @@ async function runUpdate() {
 
   // Final Verification Check
   const finalEntries = Object.values(cardDict);
-  const jaceFound = finalEntries.some(c => c.name === "Jace, the Mind Sculptor");
-
-  if (!jaceFound) {
-    console.error("!!! CRITICAL: Jace, the Mind Sculptor missing from final dictionary. Aborting Update.");
-    return;
-  } else {
-    console.log(`[VERIFIED] Jace successfully prepared for upload.`);
-  }
 
   // 5. Record the update metadata
   try {
@@ -149,12 +134,6 @@ async function runUpdate() {
 
   for (let i = 0; i < finalEntries.length; i += batchSize) {
     const batch = finalEntries.slice(i, i + batchSize);
-    
-    // Check if Jace is in this specific batch for logging
-    if (batch.some(c => c.name === "Jace, the Mind Sculptor")) {
-      console.log(`[UPSERT] Processing batch containing Jace...`);
-    }
-
     try {
       const { error: cardsError } = await supabase.from('cards').upsert(batch.map(c => ({
         oracle_id: c.oracle_id,
