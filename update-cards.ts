@@ -15,9 +15,8 @@ interface Card {
   set_type: string;
 }
 
-async function* streamScryfallCards(url: string): AsyncGenerator<Card> {
-  const response = await fetch(url);
-  const reader = response.body!.getReader();
+async function* streamJsonArray(stream: ReadableStream<Uint8Array>): AsyncGenerator<Card> {
+  const reader = stream.getReader();
   const decoder = new TextDecoder();
 
   let buffer = '';
@@ -86,6 +85,24 @@ async function* streamScryfallCards(url: string): AsyncGenerator<Card> {
   }
 }
 
+async function downloadFile(url: string, dest: string, retries = 3): Promise<void> {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    let file: Deno.FsFile | undefined;
+    try {
+      const response = await fetch(url);
+      file = await Deno.open(dest, { write: true, create: true });
+      await response.body!.pipeTo(file.writable);
+      file.close();
+      return;
+    } catch (err) {
+      file?.close();
+      if (attempt === retries) throw err;
+      console.log(`Download failed (attempt ${attempt}), retrying in 5s...`);
+      await new Promise(r => setTimeout(r, 5000));
+    }
+  }
+}
+
 async function runUpdate() {
   console.log("--- Starting Card Update ---");
   
@@ -119,8 +136,11 @@ async function runUpdate() {
     return;
   }
 
-  // 3. Download & Stream-Parse
-  console.log("Downloading and stream-parsing 500MB+ Scryfall data...");
+  // 3. Download to temp file (fast, bytes-only, no string limit)
+  const tmpFile = await Deno.makeTempFile({ suffix: '.json' });
+  console.log("Downloading 500MB+ Scryfall data to temp file...");
+  await downloadFile(target.download_uri, tmpFile);
+  console.log("Download complete, parsing...");
 
   // 4. Transform Data
   const cardDict: Record<string, any> = {};
@@ -128,7 +148,9 @@ async function runUpdate() {
   let processedCount = 0;
   let keptCount = 0;
 
-  for await (const card of streamScryfallCards(target.download_uri)) {
+  const file = await Deno.open(tmpFile, { read: true });
+  try {
+  for await (const card of streamJsonArray(file.readable)) {
     processedCount++;
     if (processedCount % 1000 === 0) {
       console.log(`Stream progress: ${processedCount} cards read, ${keptCount} kept so far`);
@@ -186,6 +208,11 @@ async function runUpdate() {
       };
     }
   }
+
+  } finally {
+    file.close();
+  }
+  await Deno.remove(tmpFile);
 
   console.log(`Stream complete: ${processedCount} cards read, ${keptCount} kept`);
 
