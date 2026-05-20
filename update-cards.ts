@@ -147,15 +147,25 @@ async function runUpdate() {
   await downloadFile(target.download_uri, tmpFile);
   console.log("Download complete, parsing...");
 
+  // Read file in fixed-size chunks to avoid decoding huge strings
+  const rawBytes = await Deno.readFile(tmpFile);
+  const CHUNK_SIZE = 65536;
+  const byteStream = new ReadableStream({
+    start(controller) {
+      for (let i = 0; i < rawBytes.length; i += CHUNK_SIZE) {
+        controller.enqueue(rawBytes.slice(i, i + CHUNK_SIZE));
+      }
+      controller.close();
+    },
+  });
+
   // 4. Transform Data
   const cardDict: Record<string, any> = {};
   const now = new Date().toISOString();
   let processedCount = 0;
   let keptCount = 0;
 
-  const file = await Deno.open(tmpFile, { read: true });
-  try {
-  for await (const card of streamJsonArray(file.readable)) {
+  for await (const card of streamJsonArray(byteStream)) {
     processedCount++;
     if (processedCount % 1000 === 0) {
       console.log(`Stream progress: ${processedCount} cards read, ${keptCount} kept so far`);
@@ -212,9 +222,6 @@ async function runUpdate() {
         is_disincentivized: isDisincentivized
       };
     }
-  }
-  } finally {
-    file.close();
   }
   await Deno.remove(tmpFile);
 
