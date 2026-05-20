@@ -90,12 +90,17 @@ async function downloadFile(url: string, dest: string, retries = 3): Promise<voi
     let file: Deno.FsFile | undefined;
     try {
       const response = await fetch(url);
+      const reader = response.body!.getReader();
       file = await Deno.open(dest, { write: true, create: true });
-      await response.body!.pipeTo(file.writable);
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        await file.write(value);
+      }
       file.close();
       return;
     } catch (err) {
-      file?.close();
+      try { file?.close(); } catch {}
       if (attempt === retries) throw err;
       console.log(`Download failed (attempt ${attempt}), retrying in 5s...`);
       await new Promise(r => setTimeout(r, 5000));
