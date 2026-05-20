@@ -153,6 +153,7 @@ async function runUpdate() {
   const byteStream = new ReadableStream({
     start(controller) {
       for (let i = 0; i < rawBytes.length; i += CHUNK_SIZE) {
+        console.log("Adding chunk to stream:", i, "to", Math.min(i + CHUNK_SIZE, rawBytes.length));
         controller.enqueue(rawBytes.slice(i, i + CHUNK_SIZE));
       }
       controller.close();
