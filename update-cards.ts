@@ -15,96 +15,53 @@ interface Card {
   set_type: string;
 }
 
-async function* parseJsonArray(raw: Uint8Array, chunkSize = 65536): AsyncGenerator<Card> {
-  const decoder = new TextDecoder();
-  let buf = '';
-  let depth = 0;
+async function* parseJsonArray(raw: Uint8Array): AsyncGenerator<Card> {
   let inString = false;
-  let arrayStarted = false;
+  let depth = 0;
   let objectStart = -1;
+  let arrayStarted = false;
   let yieldedCount = 0;
+  let logInterval = 10000;
 
-  console.log(`parseJsonArray: total ${raw.length} bytes, chunkSize ${chunkSize}, ~${Math.ceil(raw.length / chunkSize)} chunks`);
+  for (let i = 0; i < raw.length; i++) {
+    const byte = raw[i];
 
-  for (let offset = 0; offset < raw.length; offset += chunkSize) {
-    const end = Math.min(offset + chunkSize, raw.length);
-    buf += decoder.decode(raw.slice(offset, end), { stream: true });
-
-    let pos = 0;
-    let foundObjects = 0;
-
-    while (pos < buf.length) {
-      if (!arrayStarted) {
-        const bracket = buf.indexOf('[', pos);
-        if (bracket === -1) break;
-        arrayStarted = true;
-        pos = bracket + 1;
-        continue;
-      }
-
-      const nextQuote = buf.indexOf('"', pos);
-      const nextOpen = buf.indexOf('{', pos);
-      const nextClose = buf.indexOf('}', pos);
-
-      let minPos = Infinity;
-      let type = '';
-
-      if (nextQuote !== -1) { minPos = nextQuote; type = 'quote'; }
-      if (nextOpen !== -1 && nextOpen < minPos) { minPos = nextOpen; type = 'open'; }
-      if (nextClose !== -1 && nextClose < minPos) { minPos = nextClose; type = 'close'; }
-
-      if (!inString && type === 'quote') {
-        inString = true;
-        pos = minPos + 1;
-        continue;
-      }
-
-      if (inString && type === 'quote') {
-        let escapeCount = 0;
-        let check = minPos - 1;
-        while (check >= pos && buf[check] === '\\') { escapeCount++; check--; }
-        if (escapeCount % 2 === 0) {
-          inString = false;
-        }
-        pos = minPos + 1;
-        continue;
-      }
-
-      if (type === '') break;
-
-      if (!inString) {
-        if (type === 'open') {
-          if (depth === 0) objectStart = minPos;
-          depth++;
-          pos = minPos + 1;
-        } else if (type === 'close') {
-          depth--;
-          if (depth === 0 && objectStart >= 0) {
-            foundObjects++;
-            yieldedCount++;
-            yield JSON.parse(buf.slice(objectStart, minPos + 1));
-            objectStart = -1;
-          }
-          pos = minPos + 1;
-        } else {
-          pos = minPos + 1;
-        }
-      } else {
-        pos = minPos + 1;
-      }
+    if (!arrayStarted) {
+      if (byte === 0x5B) arrayStarted = true;
+      continue;
     }
 
-    if (foundObjects > 0) {
-      console.log(`parseJsonArray: chunk ${offset / chunkSize} yielded ${foundObjects} objects (total: ${yieldedCount})`);
-    } else {
-      console.log(`parseJsonArray: chunk ${offset / chunkSize} scanned (${((offset + chunkSize) / raw.length * 100).toFixed(1)}%), ${yieldedCount} objects so far`);
+    if (byte === 0x22 && !inString) {
+      inString = true;
+      continue;
     }
 
-    if (objectStart >= 0) {
-      buf = buf.slice(objectStart);
-      objectStart = 0;
-    } else {
-      buf = '';
+    if (byte === 0x22 && inString) {
+      let escCount = 0;
+      let check = i - 1;
+      while (check >= 0 && raw[check] === 0x5C) { escCount++; check--; }
+      if (escCount % 2 === 0) inString = false;
+      continue;
+    }
+
+    if (inString) continue;
+
+    if (byte === 0x7B) {
+      if (depth === 0) objectStart = i;
+      depth++;
+    } else if (byte === 0x7D) {
+      depth--;
+      if (depth === 0 && objectStart >= 0) {
+        const cardBytes = raw.slice(objectStart, i + 1);
+        yieldedCount++;
+        yield JSON.parse(new TextDecoder().decode(cardBytes));
+        objectStart = -1;
+
+        if (yieldedCount % logInterval === 0) {
+          console.log(`parseJsonArray: ${yieldedCount} cards parsed, byte ${i}/${raw.length} (${(i / raw.length * 100).toFixed(1)}%)`);
+          if (yieldedCount === 10 * logInterval) logInterval = 50000;
+        }
+      }
     }
   }
 
