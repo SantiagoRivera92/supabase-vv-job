@@ -125,8 +125,14 @@ async function runUpdate() {
   // 4. Transform Data
   const cardDict: Record<string, any> = {};
   const now = new Date().toISOString();
+  let processedCount = 0;
+  let keptCount = 0;
 
   for await (const card of streamScryfallCards(target.download_uri)) {
+    processedCount++;
+    if (processedCount % 1000 === 0) {
+      console.log(`Stream progress: ${processedCount} cards read, ${keptCount} kept so far`);
+    }
     // Basic Filters
     if (card.legalities?.vintage === 'not_legal' || !card.oracle_id) {
       continue;
@@ -167,6 +173,7 @@ async function runUpdate() {
         }
       }
 
+      keptCount++;
       cardDict[card.oracle_id] = {
         oracle_id: card.oracle_id,
         name: card.name,
@@ -179,6 +186,8 @@ async function runUpdate() {
       };
     }
   }
+
+  console.log(`Stream complete: ${processedCount} cards read, ${keptCount} kept`);
 
   // Final Verification Check
   const finalEntries = Object.values(cardDict);
