@@ -20,7 +20,6 @@ async function* parseJsonArray(raw: Uint8Array, chunkSize = 65536): AsyncGenerat
   let buf = '';
   let depth = 0;
   let inString = false;
-  let escaped = false;
   let arrayStarted = false;
   let objectStart = -1;
   let yieldedCount = 0;
@@ -31,60 +30,74 @@ async function* parseJsonArray(raw: Uint8Array, chunkSize = 65536): AsyncGenerat
     const end = Math.min(offset + chunkSize, raw.length);
     buf += decoder.decode(raw.slice(offset, end), { stream: true });
 
-    let i = 0;
+    let pos = 0;
     let foundObjects = 0;
-    while (i < buf.length) {
-      const char = buf[i];
 
-      if (escaped) {
-        escaped = false;
-        i++;
-        continue;
-      }
-
-      if (char === '\\' && inString) {
-        escaped = true;
-        i++;
-        continue;
-      }
-
+    while (pos < buf.length) {
       if (!arrayStarted) {
-        if (char === '[') {
-          arrayStarted = true;
-          console.log(`parseJsonArray: found [ at offset ${offset + i}, starting parse`);
-        }
-        i++;
+        const bracket = buf.indexOf('[', pos);
+        if (bracket === -1) break;
+        arrayStarted = true;
+        pos = bracket + 1;
         continue;
       }
 
-      if (char === '"') {
-        inString = !inString;
-        i++;
+      const nextQuote = buf.indexOf('"', pos);
+      const nextOpen = buf.indexOf('{', pos);
+      const nextClose = buf.indexOf('}', pos);
+
+      let minPos = Infinity;
+      let type = '';
+
+      if (nextQuote !== -1) { minPos = nextQuote; type = 'quote'; }
+      if (nextOpen !== -1 && nextOpen < minPos) { minPos = nextOpen; type = 'open'; }
+      if (nextClose !== -1 && nextClose < minPos) { minPos = nextClose; type = 'close'; }
+
+      if (!inString && type === 'quote') {
+        inString = true;
+        pos = minPos + 1;
         continue;
       }
+
+      if (inString && type === 'quote') {
+        let escapeCount = 0;
+        let check = minPos - 1;
+        while (check >= pos && buf[check] === '\\') { escapeCount++; check--; }
+        if (escapeCount % 2 === 0) {
+          inString = false;
+        }
+        pos = minPos + 1;
+        continue;
+      }
+
+      if (type === '') break;
 
       if (!inString) {
-        if (char === '{') {
-          if (depth === 0) {
-            objectStart = i;
-          }
+        if (type === 'open') {
+          if (depth === 0) objectStart = minPos;
           depth++;
-        } else if (char === '}') {
+          pos = minPos + 1;
+        } else if (type === 'close') {
           depth--;
           if (depth === 0 && objectStart >= 0) {
             foundObjects++;
             yieldedCount++;
-            yield JSON.parse(buf.slice(objectStart, i + 1));
+            yield JSON.parse(buf.slice(objectStart, minPos + 1));
             objectStart = -1;
           }
+          pos = minPos + 1;
+        } else {
+          pos = minPos + 1;
         }
+      } else {
+        pos = minPos + 1;
       }
-
-      i++;
     }
 
     if (foundObjects > 0) {
       console.log(`parseJsonArray: chunk ${offset / chunkSize} yielded ${foundObjects} objects (total: ${yieldedCount})`);
+    } else {
+      console.log(`parseJsonArray: chunk ${offset / chunkSize} scanned (${((offset + chunkSize) / raw.length * 100).toFixed(1)}%), ${yieldedCount} objects so far`);
     }
 
     if (objectStart >= 0) {
