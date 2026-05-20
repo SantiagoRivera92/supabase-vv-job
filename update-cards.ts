@@ -15,6 +15,77 @@ interface Card {
   set_type: string;
 }
 
+async function* streamScryfallCards(url: string): AsyncGenerator<Card> {
+  const response = await fetch(url);
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+
+  let buffer = '';
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  let arrayStarted = false;
+  let objectStart = -1;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+
+    let i = 0;
+    while (i < buffer.length) {
+      const char = buffer[i];
+
+      if (escaped) {
+        escaped = false;
+        i++;
+        continue;
+      }
+
+      if (char === '\\' && inString) {
+        escaped = true;
+        i++;
+        continue;
+      }
+
+      if (!arrayStarted) {
+        if (char === '[') arrayStarted = true;
+        i++;
+        continue;
+      }
+
+      if (char === '"') {
+        inString = !inString;
+        i++;
+        continue;
+      }
+
+      if (!inString) {
+        if (char === '{') {
+          if (depth === 0) objectStart = i;
+          depth++;
+        } else if (char === '}') {
+          depth--;
+          if (depth === 0 && objectStart >= 0) {
+            yield JSON.parse(buffer.slice(objectStart, i + 1));
+            objectStart = -1;
+          }
+        }
+      }
+
+      i++;
+    }
+
+    if (objectStart >= 0) {
+      buffer = buffer.slice(objectStart);
+      objectStart = 0;
+    } else {
+      buffer = '';
+    }
+  }
+}
+
 async function runUpdate() {
   console.log("--- Starting Card Update ---");
   
@@ -48,17 +119,14 @@ async function runUpdate() {
     return;
   }
 
-  // 3. Download & Parse
-  console.log("Downloading 500MB+ Scryfall data...");
-  const cardsRes = await fetch(target.download_uri);
-  const cardsData: Card[] = await cardsRes.json();
-  console.log(`Processing ${cardsData.length} cards...`);
+  // 3. Download & Stream-Parse
+  console.log("Downloading and stream-parsing 500MB+ Scryfall data...");
 
   // 4. Transform Data
   const cardDict: Record<string, any> = {};
   const now = new Date().toISOString();
 
-  for (const card of cardsData) {
+  for await (const card of streamScryfallCards(target.download_uri)) {
     // Basic Filters
     if (card.legalities?.vintage === 'not_legal' || !card.oracle_id) continue;
 

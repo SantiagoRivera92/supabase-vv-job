@@ -1,8 +1,11 @@
 .ruff_cache
 .venv
 .vscode
+.env
 
 find_duplicates.py
 scryfall_cache.json
 scryfall_cache_info.json
 scryfall_duplicates_cache.json
+
+archive.json
