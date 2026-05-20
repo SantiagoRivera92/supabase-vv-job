@@ -138,7 +138,7 @@ async function runUpdate() {
 
   // 3. Download to temp file (fast, bytes-only, no string limit)
   const tmpFile = await Deno.makeTempFile({ suffix: '.json' });
-  console.log("Downloading 500MB+ Scryfall data to temp file...");
+  console.log("Downloading 500MB+ Scryfall data...");
   await downloadFile(target.download_uri, tmpFile);
   console.log("Download complete, parsing...");
 
@@ -208,7 +208,6 @@ async function runUpdate() {
       };
     }
   }
-
   } finally {
     file.close();
   }
