@@ -2,9 +2,8 @@ name: Daily Card Update
 
 on:
   schedule:
-    # This runs at 11:30 AM UTC every day
     - cron: '30 11 * * *'
-  workflow_dispatch: # Allows you to run it manually from the "Actions" tab
+  workflow_dispatch: 
 
 jobs:
   update-cards:
@@ -16,8 +15,8 @@ jobs:
       - name: Setup Deno
         uses: denoland/setup-deno@v2
         with:
-          deno-version: v2.x # Ensures you use the latest stable Deno
-
+          deno-version: v2.x
+          
       - name: Run Update Script
         run: deno run --allow-read --allow-net --allow-env update-cards.ts
         env:

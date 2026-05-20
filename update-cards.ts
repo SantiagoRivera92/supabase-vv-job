@@ -1,4 +1,4 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.91.0';
 
 const weighs = JSON.parse(await Deno.readTextFile('weighs.json'));
 const prioritize = new Set(weighs.prioritize);
@@ -128,26 +128,34 @@ async function runUpdate() {
 
   for await (const card of streamScryfallCards(target.download_uri)) {
     // Basic Filters
-    if (card.legalities?.vintage === 'not_legal' || !card.oracle_id) continue;
+    if (card.legalities?.vintage === 'not_legal' || !card.oracle_id) {
+      continue;
+    }
 
+    // Skip specific sets (Memorabilia/Forbidden sets)
     if (card.set_name === "Summer Magic / Edgar" || card.set_type === "memorabilia") {
-      console.log("Skipping", card.name, "from set ", card.set_name);
       continue; 
     }
 
     // Price Calculation
     const prices = [card.prices?.usd, card.prices?.usd_foil, card.prices?.usd_etched]
       .filter((p): p is string => !!p)
-      .map(p => parseFloat(p));
+      .map(p => parseFloat(p))
+      .filter(price => price > 0.01);
 
-    if (prices.length === 0) continue;
+    if (prices.length === 0) {
+      continue;
+    }
+    
     const minPrice = Math.min(...prices);
 
-    // Cheapest Printing Logic
-    if (!(card.oracle_id in cardDict) || cardDict[card.oracle_id].price > minPrice) {
+    // Logic: Keep the absolute cheapest printing found across all sets
+    const alreadyInDict = card.oracle_id in cardDict;
+    const isCheaper = !alreadyInDict || minPrice < cardDict[card.oracle_id].price;
+
+    if (isCheaper) {
+
       let adjustedRank = card.edhrec_rank;
-      
-      // Determine Boolean flags from weighs
       const isStaple = prioritize.has(card.name);
       const isDisincentivized = deprioritize.has(card.name);
 
@@ -172,14 +180,15 @@ async function runUpdate() {
     }
   }
 
-  // 5. Record the update first to satisfy foreign key
+  // Final Verification Check
+  const finalEntries = Object.values(cardDict);
+
+  // 5. Record the update metadata
   try {
     const { error: updatesError } = await supabase.from('updates').insert({ filename: target.updated_at });
     if (updatesError) {
       console.error(`Error recording update: ${updatesError.message}`);
       return; 
-    } else {
-      console.log("Successfully recorded update.");
     }
   } catch (err) {
     console.error(`Exception recording update: ${err}`);
@@ -187,14 +196,11 @@ async function runUpdate() {
   }
 
   // 6. Bulk Upsert in Batches
-  const entries = Object.values(cardDict);
   const batchSize = 1000;
-  console.log(`Upserting ${entries.length} cards in batches of ${batchSize}...`);
+  console.log(`Upserting ${finalEntries.length} cards in batches...`);
 
-  for (let i = 0; i < entries.length; i += batchSize) {
-    const batch = entries.slice(i, i + batchSize);
-    
-    // Upsert Card Info (Including new columns)
+  for (let i = 0; i < finalEntries.length; i += batchSize) {
+    const batch = finalEntries.slice(i, i + batchSize);
     try {
       const { error: cardsError } = await supabase.from('cards').upsert(batch.map(c => ({
         oracle_id: c.oracle_id,
@@ -204,17 +210,11 @@ async function runUpdate() {
         is_staple: c.is_staple,
         is_disincentivized: c.is_disincentivized
       })));
-      
-      if (cardsError) {
-        console.error(`Error upserting cards: ${cardsError.message}`);
-      } else {
-        console.log(`Successfully upserted ${batch.length} cards.`);
-      }
+      if (cardsError) console.error(`Error upserting cards: ${cardsError.message}`);
     } catch (err) {
       console.error(`Exception upserting cards: ${err}`);
     }
 
-    // Insert Price Info
     try {
       const { error: pricesError } = await supabase.from('prices').insert(batch.map(c => ({
         oracle_id: c.oracle_id,
@@ -222,16 +222,27 @@ async function runUpdate() {
         date: c.date,
         filename: target.updated_at
       })));
-      if (pricesError) {
-        console.error(`Error inserting prices: ${pricesError.message}`);
-      } else {
-        console.log(`Successfully inserted ${batch.length} price entries.`);
-      }
+      if (pricesError) console.error(`Error inserting prices: ${pricesError.message}`);
     } catch (err) {
       console.error(`Exception inserting prices: ${err}`);
     }
 
-    if (i % 5000 === 0) console.log(`Progress: ${i} / ${entries.length}`);
+    if (i % 10000 === 0) console.log(`Progress: ${i} / ${finalEntries.length}`);
+  }
+
+  // 7. Cleanup (Only runs if the upsert finished)
+  try {
+    const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const { data: oldUpdates } = await supabase.from('updates').select('filename').lt('filename', oneWeekAgo);
+
+    if (oldUpdates && oldUpdates.length > 0) {
+      const filenames = oldUpdates.map(u => u.filename);
+      await supabase.from('prices').delete().in('filename', filenames);
+      await supabase.from('updates').delete().in('filename', filenames);
+      console.log(`Cleaned up ${filenames.length} old entries.`);
+    }
+  } catch (err) {
+    console.error('Exception during cleanup:', err);
   }
 
   console.log("--- Update Finished Successfully ---");
