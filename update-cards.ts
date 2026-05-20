@@ -23,12 +23,16 @@ async function* parseJsonArray(raw: Uint8Array, chunkSize = 65536): AsyncGenerat
   let escaped = false;
   let arrayStarted = false;
   let objectStart = -1;
+  let yieldedCount = 0;
+
+  console.log(`parseJsonArray: total ${raw.length} bytes, chunkSize ${chunkSize}, ~${Math.ceil(raw.length / chunkSize)} chunks`);
 
   for (let offset = 0; offset < raw.length; offset += chunkSize) {
     const end = Math.min(offset + chunkSize, raw.length);
     buf += decoder.decode(raw.slice(offset, end), { stream: true });
 
     let i = 0;
+    let foundObjects = 0;
     while (i < buf.length) {
       const char = buf[i];
 
@@ -45,7 +49,10 @@ async function* parseJsonArray(raw: Uint8Array, chunkSize = 65536): AsyncGenerat
       }
 
       if (!arrayStarted) {
-        if (char === '[') arrayStarted = true;
+        if (char === '[') {
+          arrayStarted = true;
+          console.log(`parseJsonArray: found [ at offset ${offset + i}, starting parse`);
+        }
         i++;
         continue;
       }
@@ -58,11 +65,15 @@ async function* parseJsonArray(raw: Uint8Array, chunkSize = 65536): AsyncGenerat
 
       if (!inString) {
         if (char === '{') {
-          if (depth === 0) objectStart = i;
+          if (depth === 0) {
+            objectStart = i;
+          }
           depth++;
         } else if (char === '}') {
           depth--;
           if (depth === 0 && objectStart >= 0) {
+            foundObjects++;
+            yieldedCount++;
             yield JSON.parse(buf.slice(objectStart, i + 1));
             objectStart = -1;
           }
@@ -72,6 +83,10 @@ async function* parseJsonArray(raw: Uint8Array, chunkSize = 65536): AsyncGenerat
       i++;
     }
 
+    if (foundObjects > 0) {
+      console.log(`parseJsonArray: chunk ${offset / chunkSize} yielded ${foundObjects} objects (total: ${yieldedCount})`);
+    }
+
     if (objectStart >= 0) {
       buf = buf.slice(objectStart);
       objectStart = 0;
@@ -79,6 +94,8 @@ async function* parseJsonArray(raw: Uint8Array, chunkSize = 65536): AsyncGenerat
       buf = '';
     }
   }
+
+  console.log(`parseJsonArray: done, yielded ${yieldedCount} total objects`);
 }
 
 async function downloadFile(url: string, dest: string, retries = 3): Promise<void> {
