@@ -15,26 +15,22 @@ interface Card {
   set_type: string;
 }
 
-async function* streamJsonArray(stream: ReadableStream<Uint8Array>): AsyncGenerator<Card> {
-  const reader = stream.getReader();
+async function* parseJsonArray(raw: Uint8Array, chunkSize = 65536): AsyncGenerator<Card> {
   const decoder = new TextDecoder();
-
-  let buffer = '';
+  let buf = '';
   let depth = 0;
   let inString = false;
   let escaped = false;
   let arrayStarted = false;
   let objectStart = -1;
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
+  for (let offset = 0; offset < raw.length; offset += chunkSize) {
+    const end = Math.min(offset + chunkSize, raw.length);
+    buf += decoder.decode(raw.slice(offset, end), { stream: true });
 
     let i = 0;
-    while (i < buffer.length) {
-      const char = buffer[i];
+    while (i < buf.length) {
+      const char = buf[i];
 
       if (escaped) {
         escaped = false;
@@ -67,7 +63,7 @@ async function* streamJsonArray(stream: ReadableStream<Uint8Array>): AsyncGenera
         } else if (char === '}') {
           depth--;
           if (depth === 0 && objectStart >= 0) {
-            yield JSON.parse(buffer.slice(objectStart, i + 1));
+            yield JSON.parse(buf.slice(objectStart, i + 1));
             objectStart = -1;
           }
         }
@@ -77,10 +73,10 @@ async function* streamJsonArray(stream: ReadableStream<Uint8Array>): AsyncGenera
     }
 
     if (objectStart >= 0) {
-      buffer = buffer.slice(objectStart);
+      buf = buf.slice(objectStart);
       objectStart = 0;
     } else {
-      buffer = '';
+      buf = '';
     }
   }
 }
@@ -147,18 +143,7 @@ async function runUpdate() {
   await downloadFile(target.download_uri, tmpFile);
   console.log("Download complete, parsing...");
 
-  // Read file in fixed-size chunks to avoid decoding huge strings
   const rawBytes = await Deno.readFile(tmpFile);
-  const CHUNK_SIZE = 65536;
-  const byteStream = new ReadableStream({
-    start(controller) {
-      for (let i = 0; i < rawBytes.length; i += CHUNK_SIZE) {
-        console.log("Adding chunk to stream:", i, "to", Math.min(i + CHUNK_SIZE, rawBytes.length));
-        controller.enqueue(rawBytes.slice(i, i + CHUNK_SIZE));
-      }
-      controller.close();
-    },
-  });
 
   // 4. Transform Data
   const cardDict: Record<string, any> = {};
@@ -166,7 +151,7 @@ async function runUpdate() {
   let processedCount = 0;
   let keptCount = 0;
 
-  for await (const card of streamJsonArray(byteStream)) {
+  for await (const card of parseJsonArray(rawBytes)) {
     processedCount++;
     if (processedCount % 1000 === 0) {
       console.log(`Stream progress: ${processedCount} cards read, ${keptCount} kept so far`);
