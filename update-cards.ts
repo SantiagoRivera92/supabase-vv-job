@@ -252,8 +252,8 @@ async function runUpdate() {
 
   // 7. Cleanup (Only runs if the upsert finished)
   try {
-    const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-    const { data: oldUpdates } = await supabase.from('updates').select('filename').lt('filename', oneWeekAgo);
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const { data: oldUpdates } = await supabase.from('updates').select('filename').lt('filename', thirtyDaysAgo);
 
     if (oldUpdates && oldUpdates.length > 0) {
       const filenames = oldUpdates.map(u => u.filename);
